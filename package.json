@@ -1,11 +1,15 @@
 {
   "name": "facebook-marketplace-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for Facebook Marketplace — direct GraphQL API access",
+  "version": "1.1.0",
+  "description": "Cross-platform MCP server for Facebook Marketplace (Linux, macOS, Windows) via direct GraphQL API",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "facebook-marketplace-mcp": "dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skiingbeast2025/facebook-marketplace-mcp.git"
   },
   "scripts": {
     "build": "tsc",

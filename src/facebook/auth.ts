@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { execSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import Database from "better-sqlite3";
@@ -76,7 +77,7 @@ function getCookieDbPath(profile = "Default"): string {
   );
 }
 
-export function extractChromeCookies(
+function extractMacChromeCookies(
   domain: string,
   profile = "Default"
 ): FacebookCookie[] {
@@ -151,6 +152,102 @@ export function extractChromeCookies(
       // cleanup failure is non-fatal
     }
   }
+}
+
+export function parseCookieInput(raw: string): FacebookCookie[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  // Parse JSON format (e.g. from Cookie-Editor / EditThisCookie export)
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((item) => item && typeof item.name === "string")
+          .map((item) => ({
+            host: item.domain || ".facebook.com",
+            name: item.name,
+            value: String(item.value ?? ""),
+            path: item.path || "/",
+            expires: item.expirationDate || 0,
+            secure: item.secure ?? true,
+            httpOnly: item.httpOnly ?? true,
+          }));
+      } else if (typeof parsed === "object") {
+        return Object.entries(parsed).map(([key, val]) => ({
+          host: ".facebook.com",
+          name: key,
+          value: String(val ?? ""),
+          path: "/",
+          expires: 0,
+          secure: true,
+          httpOnly: true,
+        }));
+      }
+    } catch {
+      // Not JSON, continue to header string parsing
+    }
+  }
+
+  // Parse standard cookie string: "c_user=123; xs=abc; ..."
+  return trimmed
+    .split(";")
+    .map((pair) => pair.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx === -1) return null;
+      const name = pair.slice(0, eqIdx).trim();
+      const value = pair.slice(eqIdx + 1).trim();
+      return {
+        host: ".facebook.com",
+        name,
+        value,
+        path: "/",
+        expires: 0,
+        secure: true,
+        httpOnly: true,
+      };
+    })
+    .filter((c): c is FacebookCookie => c !== null && c.name.length > 0);
+}
+
+export function extractChromeCookies(
+  domain: string,
+  profile = "Default"
+): FacebookCookie[] {
+  // 1. Check environment variable (string or JSON)
+  if (process.env.FB_COOKIES) {
+    const cookies = parseCookieInput(process.env.FB_COOKIES);
+    if (cookies.length > 0) return cookies;
+  }
+
+  // 2. Check cookie file path
+  if (process.env.FB_COOKIES_FILE) {
+    const filePath = path.resolve(process.env.FB_COOKIES_FILE);
+    if (fs.existsSync(filePath)) {
+      const fileContent = fs.readFileSync(filePath, "utf-8");
+      const cookies = parseCookieInput(fileContent);
+      if (cookies.length > 0) return cookies;
+    } else {
+      throw new Error(`FB_COOKIES_FILE does not exist at: ${filePath}`);
+    }
+  }
+
+  // 3. macOS Keychain fallback
+  if (process.platform === "darwin") {
+    return extractMacChromeCookies(domain, profile);
+  }
+
+  // 4. Linux / Windows without cookies provided
+  throw new Error(
+    "No Facebook cookies found.\n" +
+      "Automatic Chrome Keychain extraction is only supported on macOS.\n" +
+      "On Linux and Windows, provide your session cookies using the FB_COOKIES environment variable\n" +
+      "(e.g. FB_COOKIES='c_user=...; xs=...') or by pointing FB_COOKIES_FILE to a cookie file.\n" +
+      "See the README for details."
+  );
 }
 
 export function cookiesToHeader(cookies: FacebookCookie[]): string {
